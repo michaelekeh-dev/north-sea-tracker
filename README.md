@@ -1,5 +1,7 @@
 # North Sea Tracker
 
+![tests](https://github.com/michaelekeh-dev/north-sea-tracker/actions/workflows/tests.yml/badge.svg)
+
 A live map of the ships around Aberdeen harbour and the North Sea, built from real AIS radio data.
 
 ## How it works
@@ -12,17 +14,23 @@ Ships broadcast their position, speed and name over AIS radio, and [AIS Stream](
 
 The browser doesn't connect to AIS Stream directly because that would mean putting my API key in the page's JavaScript, where anyone could copy it. Going through my server keeps the key hidden, and it also means there's only ever one connection to AIS Stream, however many people have the map open.
 
+## Features
+
+- Live ships around Aberdeen, coloured by type, with a trail showing where each one has been
+- Click a ship to fly to it and see its speed, course, destination and distance from the harbour
+- Click the legend to hide or show a type of ship
+- Switch between a dark map and satellite view
+
 ## Decisions I made
 
 - **Ships are stored by MMSI.** Every ship has a unique 9-digit radio ID, so I use it as the key in a dictionary. Position reports and static data messages for the same ship arrive at different times, and keying both by MMSI is what lets me merge them into one record. A dictionary lookup is also instant, however many ships there are.
 - **Ships are dropped after 15 minutes of silence.** If a ship sails out of the box or turns its transponder off, it would otherwise stay on the map forever in its last position. 15 minutes is long enough that a ship with a patchy signal doesn't keep vanishing and coming back.
 - **The server pushes every 2 seconds instead of on every message.** Around Aberdeen there can be dozens of messages a second. Sending each one to the browser would mean a lot of tiny redraws for no visible benefit, so the browser gets one snapshot every 2 seconds and smooths the movement in between.
-- **"Not available" values become None.** AIS uses placeholder numbers when it doesn't know something, like 511 for heading or 102.3 knots for speed. Without handling those, ships would point the wrong way or show up as the fastest thing on the map.
+- **"Not available" values become None.** AIS uses placeholder numbers when it doesn't know something, like 511 for heading or 102.3 knots for speed. Without handling those, ships would point the wrong way or show up as the fastest thing on the map. A position of 91, 181 means the ship has no GPS fix, so those reports get skipped.
 
 ## What I'd do next
 
 - Save positions to a database so you can replay where ships went over the past day
-- Let you filter the map by ship type (only tankers, only supply boats, etc.)
 - Show which oil and gas fields the supply boats are heading to
 
 ## Run it locally
@@ -32,7 +40,7 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows  (Mac/Linux: source .venv/bin/activate)
 pip install -r requirements.txt
 copy .env.example .env          # then paste your AIS Stream key into .env
-python -m pytest                # all tests should pass
+python -m pytest                # all 12 tests should pass
 uvicorn app.main:app --reload
 ```
 

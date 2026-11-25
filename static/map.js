@@ -28,13 +28,40 @@ const map = L.map("map", { zoomControl: false }).setView([57.25, -1.75], 9);
 L.control.zoom({ position: "bottomright" }).addTo(map);
 
 // dark map from Esri, with place names on top
-L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+const darkBase = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
   maxZoom: 16,
   attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors",
-}).addTo(map);
-L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {
+});
+const darkLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {
   maxZoom: 16,
-}).addTo(map);
+});
+
+// real satellite photos from Esri (the "Google Earth" look)
+const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 18,
+  attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
+});
+
+darkBase.addTo(map);
+darkLabels.addTo(map);
+
+// button to swap between the dark map and satellite
+let satelliteOn = false;
+const viewButton = document.getElementById("view-toggle");
+viewButton.onclick = function () {
+  satelliteOn = !satelliteOn;
+  if (satelliteOn) {
+    map.removeLayer(darkBase);
+    satellite.addTo(map);
+    darkLabels.bringToFront();
+    viewButton.textContent = "Map view";
+  } else {
+    map.removeLayer(satellite);
+    darkBase.addTo(map);
+    darkLabels.bringToFront();
+    viewButton.textContent = "Satellite view";
+  }
+};
 
 // legend
 let legendHtml = "";
@@ -42,6 +69,26 @@ for (let i = 0; i < CATEGORIES.length; i++) {
   legendHtml += '<span><i style="background:' + CATEGORIES[i].color + '"></i>' + CATEGORIES[i].name + "</span>";
 }
 document.getElementById("legend").innerHTML = legendHtml;
+
+// clicking a legend item hides or shows that type of ship
+const hiddenTypes = {};
+const legendItems = document.querySelectorAll("#legend span");
+for (let i = 0; i < legendItems.length; i++) {
+  legendItems[i].onclick = function () {
+    const name = CATEGORIES[i].name;
+    hiddenTypes[name] = !hiddenTypes[name];
+    legendItems[i].classList.toggle("off", hiddenTypes[name]);
+    for (const mmsi in markers) applyVisibility(markers[mmsi]);
+  };
+}
+
+// pulsing marker on Aberdeen harbour
+L.marker(HARBOUR, {
+  interactive: false,
+  icon: L.divIcon({ className: "", iconSize: [18, 18], html: '<div class="harbour"></div>' }),
+}).addTo(map).bindTooltip("Aberdeen Harbour", { permanent: true, direction: "right", className: "harbour-label", offset: [10, 0] });
+
+const TRAIL_POINTS = 25; // how many old positions to keep for the wake
 
 // ships
 const markers = {}; // mmsi -> { marker, from, to, start, ship }
@@ -85,7 +132,15 @@ function updateShip(ship, now) {
     marker.on("click", function () {
       openPanel(ship.mmsi);
     });
-    markers[ship.mmsi] = { marker: marker, from: pos, to: pos, start: now, ship: ship };
+    marker.bindTooltip(ship.name || "Unknown vessel", { direction: "top", offset: [0, -10], className: "ship-label" });
+
+    // faded line behind the ship showing where it's been
+    const trail = L.polyline([pos], {
+      color: getCategory(ship.ship_type).color, weight: 2, opacity: 0.35, interactive: false,
+    }).addTo(map);
+
+    markers[ship.mmsi] = { marker: marker, trail: trail, from: pos, to: pos, start: now, ship: ship };
+    applyVisibility(markers[ship.mmsi]);
   } else {
     // ship we already have, slide it from where it is now to the new spot
     const entry = markers[ship.mmsi];
@@ -104,7 +159,23 @@ function updateShip(ship, now) {
       entry.marker.setIcon(makeIcon(ship));
     }
     entry.ship = ship;
+
+    // add the new spot to the wake, and drop the oldest ones
+    const points = entry.trail.getLatLngs();
+    points.push(L.latLng(pos));
+    while (points.length > TRAIL_POINTS) points.shift();
+    entry.trail.setLatLngs(points);
+    entry.marker.setTooltipContent(ship.name || "Unknown vessel");
+    applyVisibility(entry);
   }
+}
+
+function applyVisibility(entry) {
+  const hide = hiddenTypes[getCategory(entry.ship.ship_type).name] == true;
+  entry.marker.setOpacity(hide ? 0 : 1);
+  entry.trail.setStyle({ opacity: hide ? 0 : 0.35 });
+  const el = entry.marker.getElement();
+  if (el) el.style.pointerEvents = hide ? "none" : "";
 }
 
 function animate(now) {
@@ -188,6 +259,11 @@ function openPanel(mmsi) {
 
   fillPanel();
   panel.classList.add("open");
+
+  // glide the map over to the ship
+  if (markers[mmsi] != undefined) {
+    map.flyTo(markers[mmsi].marker.getLatLng(), Math.max(map.getZoom(), 11), { duration: 1.2 });
+  }
 }
 
 function closePanel() {
@@ -214,13 +290,27 @@ function updateStats(ships) {
     }
   }
 
-  setText("stat-count", ships.length);
-  setText("stat-moving", moving);
+  countTo("stat-count", ships.length);
+  countTo("stat-moving", moving);
   if (fastest != null) {
     setText("stat-fastest", fastest.toFixed(1));
   } else {
     setText("stat-fastest", "-");
   }
+}
+
+// numbers tick up or down instead of jumping
+function countTo(id, target) {
+  const el = document.getElementById(id);
+  const startValue = parseInt(el.textContent) || 0;
+  if (startValue == target) return;
+  const startTime = performance.now();
+  function step(now) {
+    const t = Math.min((now - startTime) / 600, 1);
+    el.textContent = Math.round(startValue + (target - startValue) * t);
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
 }
 
 function setStatus(live, text) {
@@ -259,6 +349,7 @@ function connect() {
     for (const mmsi in markers) {
       if (!stillHere[mmsi]) {
         map.removeLayer(markers[mmsi].marker);
+        map.removeLayer(markers[mmsi].trail);
         delete markers[mmsi];
         if (selected == mmsi) closePanel();
       }

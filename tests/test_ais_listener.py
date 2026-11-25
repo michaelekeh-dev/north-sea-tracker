@@ -57,3 +57,17 @@ def test_unknown_message_type_is_ignored():
 
     assert handle_message(store, other, NOW) is None
     assert store.count() == 0
+
+
+def test_position_91_181_means_not_available():
+    store = ShipStore()
+    no_fix = {
+        "MessageType": "PositionReport",
+        "Message": {"PositionReport": {
+            "UserID": 235000002, "Latitude": 91, "Longitude": 181,
+            "Sog": 0, "Cog": 360, "TrueHeading": 511,
+        }},
+    }
+
+    assert handle_message(store, no_fix, NOW) is None
+    assert store.all_ships() == []

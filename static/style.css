@@ -30,9 +30,19 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: #111; background: var(--warn); }
 
 /* Ship markers */
-.ship { width: 22px; height: 22px; display: grid; place-items: center; }
+.ship { position: relative; width: 22px; height: 22px; display: grid; place-items: center; }
 .ship svg { transition: transform 1.5s linear; filter: drop-shadow(0 0 4px rgba(0,0,0,0.6)); }
 .ship.selected svg { filter: drop-shadow(0 0 6px #fff); }
+.ship.selected::before { content: ""; position: absolute; width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.7); animation: ring 1.6s ease-out infinite; }
+
+/* Harbour */
+.harbour { width: 12px; height: 12px; margin: 3px; border-radius: 50%; background: var(--warn);
+  box-shadow: 0 0 0 0 rgba(245,165,36,0.6); animation: harbour 2.4s infinite; }
+.harbour-label, .ship-label { background: var(--panel) !important; color: var(--text) !important;
+  border: 1px solid var(--line) !important; border-radius: 8px !important; box-shadow: none !important;
+  font-size: 12px; padding: 3px 8px !important; }
+.harbour-label::before, .ship-label::before { display: none; }
 
 /* Info panel */
 .panel { position: fixed; top: 16px; right: 16px; z-index: 1000; width: 300px; padding: 20px;
@@ -54,12 +64,17 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .legend { position: fixed; left: 16px; bottom: 24px; z-index: 1000; display: flex; flex-wrap: wrap; gap: 10px 14px;
   padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   font-size: 12px; color: var(--muted); max-width: calc(100vw - 32px); }
+.legend span { cursor: pointer; transition: opacity 0.2s; user-select: none; }
+.legend span:hover { color: var(--text); }
+.legend span.off { opacity: 0.3; text-decoration: line-through; }
 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
 
 .leaflet-control-attribution { background: rgba(0,0,0,0.5) !important; color: var(--muted) !important; }
 .leaflet-control-attribution a { color: var(--muted) !important; }
 
 @keyframes pulse { 70% { box-shadow: 0 0 0 8px rgba(61,220,151,0); } 100% { box-shadow: 0 0 0 0 rgba(61,220,151,0); } }
+@keyframes ring { from { transform: scale(0.6); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
+@keyframes harbour { 70% { box-shadow: 0 0 0 14px rgba(245,165,36,0); } 100% { box-shadow: 0 0 0 0 rgba(245,165,36,0); } }
 @keyframes drop-in { from { transform: translateY(-12px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 @media (max-width: 640px) {
@@ -71,3 +86,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 
 /* Dark zoom buttons */
 .leaflet-bar a { background: var(--panel) !important; color: var(--text) !important; border-color: var(--line) !important; }
+
+/* Map / satellite button */
+.view-toggle { position: fixed; right: 16px; bottom: 100px; z-index: 1000; padding: 9px 14px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
+  font: inherit; font-size: 12px; cursor: pointer; backdrop-filter: blur(8px); transition: border-color 0.2s; }
+.view-toggle:hover { border-color: rgba(255,255,255,0.3); }

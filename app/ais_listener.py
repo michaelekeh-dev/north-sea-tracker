@@ -36,6 +36,9 @@ def handle_message(store, message, now):
     mmsi = body["UserID"]
 
     if kind == "PositionReport":
+        # 91 and 181 mean "position not available", so don't move the ship
+        if body["Latitude"] == 91 or body["Longitude"] == 181:
+            return None
         store.update_position(
             mmsi,
             body["Latitude"],
