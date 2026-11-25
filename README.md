@@ -24,7 +24,7 @@ The browser doesn't connect to AIS Stream directly because that would mean putti
 - Activity feed of what's happening, like ships arriving or turning up for the first time
 - Arrivals board showing which ships are heading for Aberdeen and roughly when they'll get there
 - Replay the last hour, and a heatmap of where ships have been over the last day
-- 3D view with a model for each kind of ship (cargo, tanker, ferry, supply boat, tug, trawler) sailing on top of the real map
+- 3D view with a detailed model for each kind of ship (cargo, tanker, ferry, supply boat, tug, trawler) sailing on animated water, with the coast from the real map
 
 ## Decisions I made
 
@@ -37,6 +37,7 @@ The browser doesn't connect to AIS Stream directly because that would mean putti
 - **A jump is anything faster than 60 knots.** Nothing around here can sail that fast, so if a position report would need it, the GPS is wrong or someone is faking it.
 - **History is saved to SQLite every 15 seconds and kept for 24 hours.** That's enough for the replay and heatmap without the database growing forever.
 - **The 3D ships are bigger than real life.** In the 3D view 1 unit is 1 nautical mile, and a real 200 m cargo ship would be a tiny speck at that scale. Each type gets its own size so you can still tell a tug from a tanker.
+- **The water is a shader on the map tiles.** Each pixel of a tile is checked to see if it's sea or land. Sea gets moving waves, sky reflections and sun glints, land just shows the map, so the coastline always matches the real one.
 
 ## What I'd do next
 
