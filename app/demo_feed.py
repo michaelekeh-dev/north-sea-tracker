@@ -21,6 +21,13 @@ FAKE_SHIPS = [
 ]
 
 
+def bearing_to(lat1, lon1, lat2, lon2):
+    # rough compass bearing, fine over short distances
+    dlat = lat2 - lat1
+    dlon = (lon2 - lon1) * math.cos(math.radians(lat1))
+    return math.degrees(math.atan2(dlon, dlat)) % 360
+
+
 def move(lat, lon, course, knots, seconds):
     # 1 nautical mile = 1/60 of a degree of latitude
     miles = knots * seconds / 3600
@@ -43,18 +50,48 @@ async def run_demo_feed(store, tick=2.0):
         ships.append(ship)
         store.update_static(mmsi, name, ship_type, destination, time.time())
 
+    # a few ships do something interesting so every feature can be seen
+    tug = ships[5]  # sails into the harbour, waits, then heads back out
+    standby = ships[6]  # sends a fake position every so often (gps glitch)
+    fishing = ships[7]  # goes quiet for a while (goes dark)
+    tug_wait = 0
+    tick_count = 0
+
     while True:
         now = time.time()
+        tick_count += 1
         for ship in ships:
-            ship["cog"] = (ship["cog"] + random.uniform(-4, 4)) % 360
+            if ship is tug:
+                to_harbour = math.hypot(tug["lat"] - HARBOUR[0], (tug["lon"] - HARBOUR[1]) * 0.54)
+                if tug_wait > 0:
+                    tug_wait -= 1
+                    tug["sog"] = 0.0 if tug_wait > 20 else 8.0
+                    if tug_wait == 20:
+                        tug["cog"] = 70.0  # head back out to sea
+                elif to_harbour < 0.01:
+                    tug_wait = 60
+                else:
+                    tug["sog"] = 8.0
+                    tug["cog"] = bearing_to(tug["lat"], tug["lon"], HARBOUR[0], HARBOUR[1])
+            else:
+                ship["cog"] = (ship["cog"] + random.uniform(-4, 4)) % 360
+
             # times 30 so you can actually see them move
             ship["lat"], ship["lon"] = move(ship["lat"], ship["lon"], ship["cog"], ship["sog"], tick * 30)
 
             # turn around if they leave the area
-            if ship["lat"] < 56.9 or ship["lat"] > 57.6 or ship["lon"] < -2.05 or ship["lon"] > -1.0:
+            if ship is not tug and (ship["lat"] < 56.9 or ship["lat"] > 57.6
+                                    or ship["lon"] < -2.05 or ship["lon"] > -1.0):
                 ship["cog"] = (ship["cog"] + 180) % 360
 
-            store.update_position(ship["mmsi"], ship["lat"], ship["lon"],
+            if ship is fishing and tick_count % 300 > 200:
+                continue  # silent for 200 seconds
+
+            lat = ship["lat"]
+            if ship is standby and tick_count % 150 == 0:
+                lat += 0.4  # glitch about 24 nm north
+
+            store.update_position(ship["mmsi"], lat, ship["lon"],
                                   round(ship["sog"], 1), round(ship["cog"], 1),
                                   round(ship["cog"]), now)
         await asyncio.sleep(tick)

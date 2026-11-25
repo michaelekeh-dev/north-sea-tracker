@@ -6,8 +6,9 @@ STALE_AFTER_SECONDS = 15 * 60  # 15 minutes
 
 
 class ShipStore:
-    def __init__(self):
+    def __init__(self, watcher=None):
         self.ships = {}  # mmsi -> ship dict
+        self.watcher = watcher  # optional, spots events like ships going dark
 
     def get_ship(self, mmsi):
         # make a blank record if we haven't seen this ship before
@@ -23,17 +24,24 @@ class ShipStore:
                 "ship_type": None,
                 "destination": None,
                 "last_seen": None,
+                "pos_time": None,  # when the last position came in
+                "alert": None,  # "dark" or "jump" if something looks wrong
+                "alert_time": None,
+                "arrived": False,
             }
         return self.ships[mmsi]
 
     def update_position(self, mmsi, lat, lon, sog, cog, heading, now):
         ship = self.get_ship(mmsi)
+        if self.watcher is not None:
+            self.watcher.check_position(ship, lat, lon, now)
         ship["lat"] = lat
         ship["lon"] = lon
         ship["sog"] = sog
         ship["cog"] = cog
         ship["heading"] = heading
         ship["last_seen"] = now
+        ship["pos_time"] = now
 
     def update_static(self, mmsi, name, ship_type, destination, now):
         ship = self.get_ship(mmsi)

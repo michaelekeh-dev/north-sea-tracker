@@ -112,7 +112,8 @@ function makeIcon(ship) {
   }
 
   let className = "ship";
-  if (selected == ship.mmsi) className = "ship selected";
+  if (selected == ship.mmsi) className += " selected";
+  if (ship.alert) className += " alert";
 
   return L.divIcon({
     className: "",
@@ -150,7 +151,8 @@ function updateShip(ship, now) {
     entry.start = now;
 
     // if only the direction changed, just rotate it so it turns smoothly
-    const sameLook = isMoving(entry.ship) == isMoving(ship) && entry.ship.ship_type == ship.ship_type;
+    const sameLook = isMoving(entry.ship) == isMoving(ship) && entry.ship.ship_type == ship.ship_type &&
+                     entry.ship.alert == ship.alert;
     if (sameLook) {
       let angle = 0;
       if (ship.cog != null) angle = ship.cog;
@@ -161,7 +163,8 @@ function updateShip(ship, now) {
     entry.ship = ship;
 
     // add the new spot to the wake, and drop the oldest ones
-    const points = entry.trail.getLatLngs();
+    let points = entry.trail.getLatLngs();
+    if (ship.alert == "jump") points = []; // don't draw a line across a bad position
     points.push(L.latLng(pos));
     while (points.length > TRAIL_POINTS) points.shift();
     entry.trail.setLatLngs(points);
@@ -243,6 +246,17 @@ function fillPanel() {
   setText("p-dest", s.destination || "-");
   setText("p-dist", distanceNm(s.lat, s.lon, HARBOUR[0], HARBOUR[1]).toFixed(1) + " nm");
   setText("p-seen", timeAgo(Date.now() / 1000 + serverOffset - s.last_seen));
+
+  const alertBox = document.getElementById("p-alert");
+  if (s.alert == "dark") {
+    alertBox.textContent = "Went dark: stopped broadcasting while moving";
+    alertBox.hidden = false;
+  } else if (s.alert == "jump") {
+    alertBox.textContent = "Position jump: moved further than it could sail";
+    alertBox.hidden = false;
+  } else {
+    alertBox.hidden = true;
+  }
 }
 
 function openPanel(mmsi) {
@@ -290,8 +304,15 @@ function updateStats(ships) {
     }
   }
 
+  let alerts = 0;
+  for (let i = 0; i < ships.length; i++) {
+    if (ships[i].alert) alerts++;
+  }
+
   countTo("stat-count", ships.length);
   countTo("stat-moving", moving);
+  countTo("stat-alerts", alerts);
+  document.getElementById("stat-alerts").classList.toggle("on", alerts > 0);
   if (fastest != null) {
     setText("stat-fastest", fastest.toFixed(1));
   } else {
@@ -338,6 +359,12 @@ function connect() {
     serverOffset = data.server_time - Date.now() / 1000;
     document.getElementById("demo-badge").hidden = !data.demo;
 
+    latestShips = data.ships;
+    updateFeed(data.events);
+    updateArrivals(data.ships);
+    updateStats(data.ships);
+    if (replaying) return; // keep the replay on screen
+
     const now = performance.now();
     const stillHere = {};
     for (let i = 0; i < data.ships.length; i++) {
@@ -355,7 +382,6 @@ function connect() {
       }
     }
 
-    updateStats(data.ships);
     if (selected != null) fillPanel();
   };
 
@@ -364,5 +390,168 @@ function connect() {
     setTimeout(connect, 3000);
   };
 }
+
+// activity feed
+let lastEventTime = 0;
+
+function updateFeed(events) {
+  if (events.length == 0) return;
+  const list = document.getElementById("feed-list");
+  let html = "";
+  for (let i = 0; i < events.length && i < 6; i++) {
+    const e = events[i];
+    let className = e.kind;
+    if (e.time > lastEventTime && lastEventTime != 0) className += " fresh";
+    const ago = timeAgo(Date.now() / 1000 + serverOffset - e.time);
+    html += '<li class="' + className + '" data-mmsi="' + e.mmsi + '"><b></b>' +
+            '<span>' + e.text + '</span><small>' + ago + "</small></li>";
+  }
+  list.innerHTML = html;
+  lastEventTime = events[0].time;
+}
+
+// clicking an event opens that ship
+document.getElementById("feed-list").onclick = function (event) {
+  const item = event.target.closest("li");
+  if (item && markers[item.dataset.mmsi] != undefined) openPanel(Number(item.dataset.mmsi));
+};
+
+// arrivals board: ships heading for the harbour and roughly when they'll get there
+function headingForHarbour(ship) {
+  if (ship.destination && ship.destination.includes("ABERDEEN")) return true;
+  if (ship.cog == null) return false;
+  // compare its course with the direction of the harbour
+  const toHarbour = Math.atan2((HARBOUR[1] - ship.lon) * Math.cos(ship.lat * Math.PI / 180),
+                               HARBOUR[0] - ship.lat) * 180 / Math.PI;
+  let diff = Math.abs(((ship.cog - toHarbour) % 360 + 540) % 360 - 180);
+  return diff < 30;
+}
+
+function updateArrivals(ships) {
+  const coming = [];
+  for (let i = 0; i < ships.length; i++) {
+    const s = ships[i];
+    if (s.sog == null || s.sog < 1 || s.arrived) continue;
+    const dist = distanceNm(s.lat, s.lon, HARBOUR[0], HARBOUR[1]);
+    if (dist > 40 || dist < 1) continue;
+    if (!headingForHarbour(s)) continue;
+    coming.push({ ship: s, dist: dist, minutes: dist / s.sog * 60 });
+  }
+  coming.sort(function (a, b) { return a.minutes - b.minutes; });
+
+  const list = document.getElementById("arrivals-list");
+  if (coming.length == 0) {
+    list.innerHTML = '<li class="empty">Nothing heading in right now</li>';
+    return;
+  }
+  let html = "";
+  for (let i = 0; i < coming.length && i < 4; i++) {
+    const c = coming[i];
+    const color = getCategory(c.ship.ship_type).color;
+    const minutes = Math.round(c.minutes);
+    let eta = minutes + " min";
+    if (minutes >= 60) eta = Math.floor(minutes / 60) + "h " + (minutes % 60) + "m";
+    html += '<li><i style="background:' + color + '"></i><span>' + (c.ship.name || "Unknown vessel") + "</span>" +
+            "<small>" + c.dist.toFixed(1) + " nm</small><b>" + eta + "</b></li>";
+  }
+  list.innerHTML = html;
+}
+
+// heatmap of where ships have been over the last day
+let heatLayer = null;
+const heatButton = document.getElementById("heat-toggle");
+heatButton.onclick = function () {
+  if (heatLayer != null) {
+    map.removeLayer(heatLayer);
+    heatLayer = null;
+    heatButton.classList.remove("on");
+    return;
+  }
+  fetch("/history/heat").then(function (r) { return r.json(); }).then(function (points) {
+    heatLayer = L.heatLayer(points, {
+      radius: 16, blur: 20, maxZoom: 12, minOpacity: 0.35,
+      gradient: { 0.3: "#4ea8ff", 0.6: "#3ddc97", 0.8: "#f5a524", 1: "#ff4d4f" },
+    }).addTo(map);
+    heatButton.classList.add("on");
+  });
+};
+
+// replay the last hour from the saved history
+let replaying = false;
+let latestShips = [];
+let frames = [];
+let playTimer = null;
+// replay circles get their own layer so hiding the live ships doesn't hide them
+map.createPane("replay");
+const replayLayer = L.layerGroup().addTo(map);
+const replayBar = document.getElementById("replay-bar");
+const slider = document.getElementById("replay-slider");
+
+function drawFrame(i) {
+  const frame = frames[i];
+  if (frame == undefined) return;
+  replayLayer.clearLayers();
+  for (let j = 0; j < frame.ships.length; j++) {
+    const s = frame.ships[j];
+    L.circleMarker([s.lat, s.lon], {
+      pane: "replay", radius: 5, color: getCategory(s.ship_type).color, fillOpacity: 0.9, weight: 1,
+    }).bindTooltip(s.name || "Unknown vessel").addTo(replayLayer);
+  }
+  const time = new Date(frame.t * 1000);
+  setText("replay-time", time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+}
+
+function setLiveVisible(visible) {
+  map.getPane("markerPane").style.display = visible ? "" : "none";
+  map.getPane("overlayPane").style.opacity = visible ? "" : "0";
+}
+
+document.getElementById("replay-toggle").onclick = function () {
+  fetch("/history/frames?minutes=60").then(function (r) { return r.json(); }).then(function (data) {
+    if (data.length == 0) {
+      setText("replay-toggle", "No history yet");
+      setTimeout(function () { setText("replay-toggle", "Replay"); }, 2000);
+      return;
+    }
+    frames = data;
+    replaying = true;
+    if (selected != null) closePanel();
+    setLiveVisible(false);
+    slider.max = frames.length - 1;
+    slider.value = 0;
+    drawFrame(0);
+    replayBar.hidden = false;
+  });
+};
+
+slider.oninput = function () {
+  drawFrame(Number(slider.value));
+};
+
+document.getElementById("replay-play").onclick = function () {
+  if (playTimer != null) {
+    clearInterval(playTimer);
+    playTimer = null;
+    setText("replay-play", "Play");
+    return;
+  }
+  setText("replay-play", "Pause");
+  playTimer = setInterval(function () {
+    let next = Number(slider.value) + 1;
+    if (next > frames.length - 1) next = 0;
+    slider.value = next;
+    drawFrame(next);
+  }, 250);
+};
+
+document.getElementById("replay-exit").onclick = function () {
+  if (playTimer != null) clearInterval(playTimer);
+  playTimer = null;
+  setText("replay-play", "Play");
+  replaying = false;
+  replayLayer.clearLayers();
+  replayBar.hidden = true;
+  setLiveVisible(true);
+};
 
 connect();

@@ -17,6 +17,7 @@
       <div><span id="stat-count">0</span><label>ships</label></div>
       <div><span id="stat-moving">0</span><label>moving</label></div>
       <div><span id="stat-fastest">-</span><label>fastest (kn)</label></div>
+      <div><span id="stat-alerts" class="alerts-count">0</span><label>alerts</label></div>
     </div>
     <div id="demo-badge" class="demo-badge" hidden>DEMO DATA</div>
   </header>
@@ -33,12 +34,36 @@
       <dt>Distance to harbour</dt><dd id="p-dist"></dd>
       <dt>Last heard</dt><dd id="p-seen"></dd>
     </dl>
+    <div id="p-alert" class="panel-alert" hidden></div>
   </aside>
 
+  <section class="feed">
+    <h3>Activity</h3>
+    <ul id="feed-list"><li class="empty">Waiting for something to happen...</li></ul>
+  </section>
+
+  <section class="arrivals">
+    <h3>Arriving at Aberdeen</h3>
+    <ul id="arrivals-list"><li class="empty">Nothing heading in right now</li></ul>
+  </section>
+
   <div class="legend" id="legend"></div>
-  <button id="view-toggle" class="view-toggle">Satellite view</button>
+
+  <div class="controls">
+    <button id="view-toggle">Satellite view</button>
+    <button id="heat-toggle">Heatmap</button>
+    <button id="replay-toggle">Replay</button>
+  </div>
+
+  <div id="replay-bar" class="replay-bar" hidden>
+    <button id="replay-play">Play</button>
+    <input id="replay-slider" type="range" min="0" max="0" value="0">
+    <span id="replay-time">--:--</span>
+    <button id="replay-exit">Back to live</button>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <script src="map.js"></script>
 </body>
 </html>
