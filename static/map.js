@@ -554,4 +554,28 @@ document.getElementById("replay-exit").onclick = function () {
   setLiveVisible(true);
 };
 
+// 3D view, only loaded the first time you open it
+let in3d = false;
+const button3d = document.getElementById("toggle-3d");
+button3d.onclick = function () {
+  const container = document.getElementById("view3d");
+  in3d = !in3d;
+  import("./view3d.js").then(function (view) {
+    if (in3d) {
+      if (replaying) document.getElementById("replay-exit").click();
+      container.hidden = false;
+      document.getElementById("map").style.visibility = "hidden";
+      view.show3d(container);
+      button3d.textContent = "2D view";
+      button3d.classList.add("on");
+    } else {
+      view.hide3d();
+      container.hidden = true;
+      document.getElementById("map").style.visibility = "";
+      button3d.textContent = "3D view";
+      button3d.classList.remove("on");
+    }
+  });
+};
+
 connect();

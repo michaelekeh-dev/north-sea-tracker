@@ -9,6 +9,7 @@
 </head>
 <body>
   <div id="map"></div>
+  <div id="view3d" hidden></div>
 
   <header class="hud">
     <h1>NORTH SEA TRACKER</h1>
@@ -50,6 +51,7 @@
   <div class="legend" id="legend"></div>
 
   <div class="controls">
+    <button id="toggle-3d">3D view</button>
     <button id="view-toggle">Satellite view</button>
     <button id="heat-toggle">Heatmap</button>
     <button id="replay-toggle">Replay</button>
@@ -62,6 +64,14 @@
     <button id="replay-exit">Back to live</button>
   </div>
 
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <script src="map.js"></script>

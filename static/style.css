@@ -11,7 +11,8 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-#map { position: fixed; inset: 0; background: var(--bg); }
+#map, #view3d { position: fixed; inset: 0; background: var(--bg); }
+#view3d[hidden] { display: none; }
 
 /* Top left info */
 .hud { position: fixed; top: 16px; left: 16px; z-index: 1000; padding: 16px 18px;
