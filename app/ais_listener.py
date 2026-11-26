@@ -73,13 +73,18 @@ async def run_listener(store, api_key):
     # keep reconnecting if the connection drops
     while True:
         try:
-            async with websockets.connect(AIS_URL) as ws:
+            # AIS Stream can be slow to answer, so wait up to 30s instead of the default 10s
+            async with websockets.connect(AIS_URL, open_timeout=30) as ws:
                 # has to be sent within 3 seconds of connecting
                 await ws.send(json.dumps(subscription))
                 print("Connected to AIS Stream")
 
                 async for raw in ws:
                     message = json.loads(raw)
+                    if "error" in message:
+                        # e.g. a bad API key. AIS Stream sends this and then hangs up
+                        print("AIS Stream error:", message["error"])
+                        continue
                     handle_message(store, message, time.time())
 
         except asyncio.CancelledError:

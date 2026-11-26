@@ -28,7 +28,8 @@ SAVE_EVERY_SECONDS = 15
 
 watcher = Watcher()
 store = ShipStore(watcher)
-history = History()
+# on Railway this can point at a volume so the history survives redeploys
+history = History(os.getenv("HISTORY_DB", "history.db"))
 started_at = time.time()
 
 
