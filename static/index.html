@@ -52,9 +52,17 @@
 
   <div class="controls">
     <button id="toggle-3d">3D view</button>
-    <button id="view-toggle">Satellite view</button>
+    <button id="view-toggle">Map view</button>
     <button id="heat-toggle">Heatmap</button>
     <button id="replay-toggle">Replay</button>
+  </div>
+
+  <!-- extra buttons for the 3D view -->
+  <div id="controls3d" class="controls3d" hidden>
+    <div id="follow-chip" class="follow-chip" hidden>Following <b id="follow-name"></b> <button id="follow-stop" aria-label="Stop following">X</button></div>
+    <button id="spin-3d">Spin</button>
+    <button id="tour-3d">Tour</button>
+    <button id="reset-3d">Reset view</button>
   </div>
 
   <div id="replay-bar" class="replay-bar" hidden>

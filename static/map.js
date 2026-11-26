@@ -42,11 +42,12 @@ const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/servi
   attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
 });
 
-darkBase.addTo(map);
+// satellite photos by default, with the place names on top
+satellite.addTo(map);
 darkLabels.addTo(map);
 
 // button to swap between the dark map and satellite
-let satelliteOn = false;
+let satelliteOn = true;
 const viewButton = document.getElementById("view-toggle");
 viewButton.onclick = function () {
   satelliteOn = !satelliteOn;
@@ -61,6 +62,8 @@ viewButton.onclick = function () {
     darkLabels.bringToFront();
     viewButton.textContent = "Satellite view";
   }
+  // the 3D view uses the same map, so update it too if it's open
+  if (in3d) import("./view3d.js").then(function (view) { view.refreshStyle(); });
 };
 
 // legend
@@ -566,10 +569,14 @@ button3d.onclick = function () {
       container.hidden = false;
       document.getElementById("map").style.visibility = "hidden";
       view.show3d(container);
+      document.getElementById("heat-toggle").hidden = true; // these only work on the 2D map
+      document.getElementById("replay-toggle").hidden = true;
       button3d.textContent = "2D view";
       button3d.classList.add("on");
     } else {
       view.hide3d();
+      document.getElementById("heat-toggle").hidden = false;
+      document.getElementById("replay-toggle").hidden = false;
       container.hidden = true;
       document.getElementById("map").style.visibility = "";
       button3d.textContent = "3D view";

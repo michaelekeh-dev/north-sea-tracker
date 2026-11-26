@@ -108,7 +108,7 @@ void main() {
     if (uSatellite > 0.5) {
       isWater = smoothstep(0.0, 0.05, s.b - s.r) * (1.0 - smoothstep(0.32, 0.42, brightness));
     } else {
-      isWater = 1.0 - smoothstep(0.13, 0.16, brightness);
+      isWater = 1.0 - smoothstep(0.18, 0.22, brightness);
     }
     vec3 land = tile * (0.7 + 0.8 * max(uSunDir.y, 0.0));
     colour = mix(land, colour, isWater);

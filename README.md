@@ -25,6 +25,7 @@ The browser doesn't connect to AIS Stream directly because that would mean putti
 - Arrivals board showing which ships are heading for Aberdeen and roughly when they'll get there
 - Replay the last hour, and a heatmap of where ships have been over the last day
 - 3D view with a detailed model for each kind of ship (cargo, tanker, ferry, supply boat, tug, trawler) sailing on animated water, with the coast from the real map
+- In 3D, click a ship to lock the camera onto it and circle round it, or press Tour to hop between ships
 
 ## Decisions I made
 

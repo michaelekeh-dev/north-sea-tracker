@@ -5,22 +5,32 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Sky } from "three/addons/objects/Sky.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { makeShipModel } from "./boats3d.js";
 import { makeWaterMaterial, waterUniforms, foamTexture, softCircle } from "./water3d.js";
 
 const CENTER = [57.25, -1.75]; // middle of the area we track
 const AREA = { south: 56.9, north: 57.6, west: -2.5, east: -1.0 };
 const TILE_ZOOM = 10;
-// real ships would be too small to see, so these are bigger than real life (in nm)
-const SHIP_LENGTH = { Cargo: 0.9, Tanker: 0.9, Passenger: 0.75, "Tug/service": 0.4, Fishing: 0.35, Other: 0.5 };
+// roughly how long each kind of ship really is (in nm). Up close they're drawn at
+// this size, further away they get bigger so you can still see them.
+const REAL_LENGTH = { Cargo: 0.16, Tanker: 0.14, Passenger: 0.07, "Tug/service": 0.035, Fishing: 0.025, Other: 0.045 };
+const BIGGEST = { Cargo: 0.9, Tanker: 0.9, Passenger: 0.75, "Tug/service": 0.4, Fishing: 0.35, Other: 0.5 };
 
-let scene, camera, renderer, controls, raycaster, mouse, sun;
+let scene, camera, renderer, labelRenderer, controls, raycaster, mouse, sun, ground, groundStyle;
 let lastTime = 0;
 const smokeTexture = softCircle("rgba(235,235,235,1)");
 const shadowTexture = softCircle("rgba(0,0,0,1)");
 let started = false;
 let running = false;
 const boats = {}; // mmsi -> { group, from, to, start }
+
+// following a ship: the camera flies to it, then moves along with it
+let followed = null;
+let flight = null; // { start, fromTarget, fromCamera, offset } while flying over
+let lastFollowPos = null;
+let touring = false;
+let tourTimer = null;
 
 // lat/lon to x/z in nautical miles from the centre
 function toScene(lat, lon) {
@@ -88,9 +98,10 @@ function addGround(tileUrl) {
 
 function makeBoat(ship) {
   const category = getCategory(ship.ship_type); // from map.js
-  const length = SHIP_LENGTH[category.name];
+  // everything is built 1 unit long, then the whole group is scaled every frame
+  const length = 1;
 
-  // the model is 10 units long, so shrink it to the right size.
+  // the model is 10 units long, so shrink it to 1.
   // the MMSI is used to pick its colours, so each ship always looks the same
   const model = makeShipModel(category.name, ship.ship_type, ship.mmsi);
   model.scale.setScalar(length / 10);
@@ -170,9 +181,19 @@ function makeBoat(ship) {
     }
   }
 
+  // name tag floating above the ship
+  const tag = document.createElement("div");
+  tag.className = "ship-tag";
+  const label = new CSS2DObject(tag);
+  label.position.set(0, 0.45, 0);
+
   const group = new THREE.Group();
-  group.add(shadow, wake, marker, ring, model);
-  group.userData = { mmsi: ship.mmsi, wake: wake, ring: ring, model: model, puffs: puffs, bob: Math.random() * 10 };
+  group.add(shadow, wake, marker, ring, model, label);
+  group.userData = {
+    mmsi: ship.mmsi, wake: wake, ring: ring, model: model, puffs: puffs, tag: tag, marker: marker,
+    bob: Math.random() * 10, real: REAL_LENGTH[category.name], biggest: BIGGEST[category.name],
+    small: category.name == "Tug/service" || category.name == "Fishing",
+  };
   return group;
 }
 
@@ -202,6 +223,7 @@ function updateBoats(now) {
 
   for (const mmsi in boats) {
     if (!stillHere[mmsi]) {
+      boats[mmsi].group.userData.tag.remove();
       scene.remove(boats[mmsi].group);
       delete boats[mmsi];
     }
@@ -227,10 +249,22 @@ function animate(now) {
       boat.group.rotation.y = -boat.ship.cog * Math.PI / 180;
     }
 
+    // real size up close, bigger further away so you can still spot it
+    const info = boat.group.userData;
+    const distance = camera.position.distanceTo(boat.group.position);
+    boat.group.scale.setScalar(Math.min(info.biggest, Math.max(info.real, distance * 0.05)));
+
+    // name tag: only for ships nearby, or the one you're following
+    const isFollowed = followed == boat.ship.mmsi;
+    const name = boat.ship.name || (isFollowed ? "Unknown vessel" : "");
+    info.tag.textContent = name;
+    info.tag.classList.toggle("followed", isFollowed);
+    info.tag.style.opacity = name && (isFollowed || distance < 12) ? 1 : 0;
+
     // gentle rolling and pitching on the waves (smaller boats move more)
-    const model = boat.group.userData.model;
-    const bob = boat.group.userData.bob + now / 900;
-    const small = model.scale.x < 0.05 ? 2 : 1;
+    const model = info.model;
+    const bob = info.bob + now / 900;
+    const small = info.small ? 2 : 1;
     model.position.y = Math.sin(bob) * 0.002 * small;
     model.rotation.z = Math.sin(bob * 0.8) * 0.02 * small;
     model.rotation.x = Math.sin(bob * 0.6 + 1) * 0.008 * small;
@@ -255,12 +289,130 @@ function animate(now) {
     }
   }
 
-  // the sun's shadows only cover the area around where you're looking, so move them with the camera
+  updateFollow(now);
+
+  // the sun's shadows only cover the area around where you're looking, so move them
+  // with the camera, and make them sharper the closer you are
+  const zoom = camera.position.distanceTo(controls.target);
+  const size = Math.min(4, Math.max(0.25, zoom * 0.6));
+  sun.shadow.camera.left = -size;
+  sun.shadow.camera.right = size;
+  sun.shadow.camera.top = size;
+  sun.shadow.camera.bottom = -size;
+  sun.shadow.camera.updateProjectionMatrix();
   sun.target.position.copy(controls.target);
   sun.position.copy(controls.target).addScaledVector(waterUniforms.uSunDir.value, 30);
 
+  // move the near clipping plane in when you zoom right in, so ships don't get cut off
+  camera.near = Math.min(0.1, Math.max(0.002, zoom * 0.01));
+  camera.updateProjectionMatrix();
+
   controls.update();
   renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+// keep the camera on the selected ship (selected comes from map.js, set when a panel is open)
+function updateFollow(now) {
+  if (selected != followed) {
+    if (selected != null && boats[selected] != undefined) startFollow(selected);
+    else stopFollow();
+  }
+  if (followed == null || boats[followed] == undefined) return;
+  const shipPos = boats[followed].group.position;
+
+  if (flight) {
+    // fly over smoothly, ending up a short distance from the ship
+    let t = Math.min((now - flight.start) / 1400, 1);
+    t = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    controls.target.lerpVectors(flight.fromTarget, shipPos, t);
+    camera.position.lerpVectors(flight.fromCamera, shipPos.clone().add(flight.offset), t);
+    if (t >= 1) flight = null;
+  } else {
+    // move the camera along with the ship, so you can still orbit around it
+    camera.position.add(shipPos.clone().sub(lastFollowPos));
+    controls.target.copy(shipPos);
+  }
+  lastFollowPos = shipPos.clone();
+}
+
+function startFollow(mmsi) {
+  followed = mmsi;
+  const shipPos = boats[mmsi].group.position;
+  const size = boats[mmsi].group.userData.real;
+  // come in from the side you're already looking from
+  const direction = camera.position.clone().sub(controls.target).setY(0).normalize();
+  const distance = Math.max(0.1, size * 2.8);
+  flight = {
+    start: performance.now(),
+    fromTarget: controls.target.clone(),
+    fromCamera: camera.position.clone(),
+    offset: direction.multiplyScalar(distance).setY(distance * 0.45),
+  };
+  lastFollowPos = shipPos.clone();
+  controls.zoomToCursor = false;
+  document.getElementById("follow-name").textContent = boats[mmsi].ship.name || "Unknown vessel";
+  document.getElementById("follow-chip").hidden = false;
+}
+
+function stopFollow() {
+  followed = null;
+  flight = null;
+  controls.autoRotate = false;
+  controls.zoomToCursor = true;
+  document.getElementById("spin-3d").classList.remove("on");
+  document.getElementById("follow-chip").hidden = true;
+  if (touring) stopTour();
+}
+
+// tour: hop between ships every few seconds and spin slowly round each one
+function nextTourShip() {
+  const list = latestShips.filter(function (s) { return boats[s.mmsi] != undefined; });
+  if (list.length == 0) return;
+  const moving = list.filter(function (s) { return s.sog != null && s.sog > 0.5; });
+  const pool = moving.length > 0 ? moving : list;
+  let pick = pool[Math.floor(Math.random() * pool.length)];
+  if (pool.length > 1 && pick.mmsi == followed) pick = pool[(pool.indexOf(pick) + 1) % pool.length];
+  openPanel(pick.mmsi); // from map.js, which also sets selected
+  controls.autoRotate = true;
+}
+
+function startTour() {
+  touring = true;
+  document.getElementById("tour-3d").classList.add("on");
+  nextTourShip();
+  tourTimer = setInterval(nextTourShip, 10000);
+}
+
+function stopTour() {
+  touring = false;
+  clearInterval(tourTimer);
+  document.getElementById("tour-3d").classList.remove("on");
+}
+
+function resetView() {
+  closePanel(); // from map.js
+  stopFollow();
+  const harbour = toScene(HARBOUR[0], HARBOUR[1]);
+  controls.target.copy(harbour).add(new THREE.Vector3(4, 0, -2));
+  camera.position.set(harbour.x + 6, 7, harbour.z + 9);
+}
+
+function setUpButtons() {
+  document.getElementById("spin-3d").onclick = function () {
+    if (followed == null) return;
+    controls.autoRotate = !controls.autoRotate;
+    this.classList.toggle("on", controls.autoRotate);
+  };
+  document.getElementById("tour-3d").onclick = function () {
+    if (touring) stopTour();
+    else startTour();
+  };
+  document.getElementById("reset-3d").onclick = resetView;
+  document.getElementById("follow-stop").onclick = function () { closePanel(); };
+  window.addEventListener("keydown", function (event) {
+    if (event.key == "Escape" && running) closePanel();
+  });
 }
 
 function start(container) {
@@ -284,8 +436,16 @@ function start(container) {
   controls.target.copy(harbour).add(new THREE.Vector3(4, 0, -2));
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI / 2.15; // don't go under the sea
-  controls.minDistance = 0.5;
-  controls.maxDistance = 60;
+  controls.minDistance = 0.03;
+  controls.maxDistance = 70;
+  controls.zoomToCursor = true; // scroll towards wherever the mouse is
+  controls.autoRotateSpeed = 0.8;
+
+  // name tags are normal HTML laid over the 3D scene
+  labelRenderer = new CSS2DRenderer();
+  labelRenderer.setSize(container.clientWidth, container.clientHeight);
+  labelRenderer.domElement.className = "tag-layer";
+  container.appendChild(labelRenderer.domElement);
 
   // sky with the sun low in the south west, like a North Sea afternoon
   const sunDirection = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 14), THREE.MathUtils.degToRad(215));
@@ -318,12 +478,22 @@ function start(container) {
   scene.add(sun);
   scene.add(sun.target);
 
-  scene.add(addGround(currentTileUrl()));
+  ground = addGround(currentTileUrl());
+  groundStyle = satelliteOn;
+  scene.add(ground);
+  setUpButtons();
 
   // click a boat to open its info, same as the 2D map
   raycaster = new THREE.Raycaster();
   mouse = new THREE.Vector2();
+  // a click is a press and release without dragging (dragging is for moving the camera)
+  let downAt = null;
+  renderer.domElement.addEventListener("pointerdown", function (event) {
+    downAt = [event.clientX, event.clientY];
+    if (touring) stopTour();
+  });
   renderer.domElement.addEventListener("click", function (event) {
+    if (downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) return;
     const box = renderer.domElement.getBoundingClientRect();
     mouse.x = (event.clientX - box.left) / box.width * 2 - 1;
     mouse.y = -(event.clientY - box.top) / box.height * 2 + 1;
@@ -335,6 +505,8 @@ function start(container) {
       let obj = hits[0].object;
       while (obj.parent && obj.userData.mmsi == undefined) obj = obj.parent;
       openPanel(obj.userData.mmsi); // from map.js
+    } else if (followed != null) {
+      closePanel(); // clicked the water: stop following
     }
   });
 
@@ -342,6 +514,7 @@ function start(container) {
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
+    labelRenderer.setSize(container.clientWidth, container.clientHeight);
   });
   started = true;
 }
@@ -354,12 +527,25 @@ function currentTileUrl() {
   return "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
 }
 
+// swap the map under the sea when you change between satellite and the dark map
+export function refreshStyle() {
+  if (!started || groundStyle == satelliteOn) return;
+  scene.remove(ground);
+  ground = addGround(currentTileUrl());
+  groundStyle = satelliteOn;
+  scene.add(ground);
+}
+
 export function show3d(container) {
   if (!started) start(container);
+  refreshStyle();
   running = true;
+  document.getElementById("controls3d").hidden = false;
   requestAnimationFrame(animate);
 }
 
 export function hide3d() {
   running = false;
+  if (touring) stopTour();
+  document.getElementById("controls3d").hidden = true;
 }
